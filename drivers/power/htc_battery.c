@@ -1311,7 +1311,20 @@ static void htc_usb_overheat_routine(void)
 		BATT_LOG("[USBOH] Prev state:%d, Curr state:%d, temp=%d\n", prev_state, g_htc_usb_overheat_check_state, usb_pwr_temp);
 }
 
-static void htc_usb_overheat_worker(struct work_struct *work)
+#if 1
+extern void register_charge_level(int level);
+#endif
+
+#define DISCHG_UPDATE_PERIOD_MS			(1000 * 60)
+#define ONE_PERCENT_LIMIT_PERIOD_MS		(1000 * (60 + 10))
+#define FIVE_PERCENT_LIMIT_PERIOD_MS	(1000 * (300 + 10))
+#define ONE_MINUTES_MS					(1000 * (60 + 10))
+#define FOURTY_MINUTES_MS				(1000 * (2400 + 10))
+#define SIXTY_MINUTES_MS				(1000 * (3600 + 10))
+#define CHG_ONE_PERCENT_LIMIT_PERIOD_MS	(1000 * 60)
+#define QUICK_CHG_ONE_PERCENT_LIMIT_PERIOD_MS	(1000 * 30)
+#define DEMO_GAP_WA						6
+static void batt_level_adjust(unsigned long time_since_last_update_ms)
 {
 	int usb_pwr_temp = pm8996_get_usb_temp();
 	unsigned int prev_state = g_htc_usb_overheat_check_state;
@@ -1855,14 +1868,6 @@ static void batt_worker(struct work_struct *work)
 #endif //CONFIG_HTC_BATT_PCN0013
 
 		if (htc_batt_info.rep.full_level != 100) {
-			BATT_EMBEDDED("set full level charging_enable(%d)", charging_enabled);
-			set_batt_psy_property(POWER_SUPPLY_PROP_BATTERY_CHARGING_ENABLED, charging_enabled);
-		} else if (charging_enabled != gs_prev_charging_enabled) {
-			BATT_EMBEDDED("set charging_enable(%d)", charging_enabled);
-			set_batt_psy_property(POWER_SUPPLY_PROP_BATTERY_CHARGING_ENABLED, charging_enabled);
-		}
-
-		if (htc_batt_info.rep.full_level != 100) {
 			BATT_EMBEDDED("set full level pwrsrc_enable(%d)", pwrsrc_enabled);
 			set_batt_psy_property(POWER_SUPPLY_PROP_CHARGING_ENABLED, pwrsrc_enabled);
 		} else if (pwrsrc_enabled != s_prev_pwrsrc_enabled) {
@@ -1870,46 +1875,33 @@ static void batt_worker(struct work_struct *work)
 			set_batt_psy_property(POWER_SUPPLY_PROP_CHARGING_ENABLED, pwrsrc_enabled);
 		}
 	} else {
-		/* TODO: check if we need to enable batfet while unplugged */
+		
 		if (htc_batt_info.prev.charging_source != htc_batt_info.rep.charging_source || s_first) {
-			g_BI_data_ready &= ~HTC_BATT_CHG_BI_BIT_CHGR;
-			batt_chgr_start_flag = false;
-			g_batt_chgr_start_temp = 0;
-			g_batt_chgr_start_level = 0;
-			g_batt_chgr_start_batvol = 0;
 			user_set_chg_curr = 0;
 			charging_enabled = 0;
 			pwrsrc_enabled = 0;
-#ifdef CONFIG_HTC_BATT_PCN0017
 			g_is_unknown_charger = false;
-#endif //CONFIG_HTC_BATT_PCN0017
-#ifdef CONFIG_HTC_BATT_WA_PCN0013
 			s_vbus_valid_no_chger_cnt = 0;
-#endif //CONFIG_HTC_BATT_WA_PCN0013
-#ifdef CONFIG_HTC_BATT_PCN0022
+			s_hvdcp_no_chg_cnt = 0;
+#ifdef CONFIG_HTC_CHARGER
 			g_usb_overheat = false;
 			g_usb_overheat_check_count = 0;
-#endif //CONFIG_HTC_BATT_PCN0022
-#ifdef CONFIG_HTC_BATT_PCN0020
+			g_usb_temp = 0;
+#endif 
 			if(s_first){
 				pr_info("ignore the fist time on boot.\n");
 			}else{
 				g_is_pd_charger = false;
 				g_pd_voltage = 0;
 				g_pd_current = 0;
-				g_is_pd_fast_charge = false;
-				update_htc_extension_state();
 			}
-#endif //CONFIG_HTC_BATT_PCN0020
 			power_supply_set_current_limit(htc_batt_info.usb_psy, 0);
-#ifdef CONFIG_HTC_BATT_PCN0017
 			if ((htc_batt_info.vbus/1000) < 4250){
 				g_is_unknown_charger = false;
 				g_rerun_apsd_done = false;
 				if (delayed_work_pending(&htc_batt_info.chk_unknown_chg_work))
 					cancel_delayed_work(&htc_batt_info.chk_unknown_chg_work);
 			}
-#endif //CONFIG_HTC_BATT_PCN0017
 		}
 	}
 
@@ -1917,21 +1909,17 @@ static void batt_worker(struct work_struct *work)
 	s_prev_pwrsrc_enabled = pwrsrc_enabled;
 	s_prev_user_set_chg_curr = user_set_chg_curr;
 
-	/* Disable charger when entering FTM mode only in a MFG ROM
-	 * htc_battery_pwrsrc_disable would change pwrsrc_enabled, so
-	 * it needs to be put in the bottom of batt_worker.
-	 */
 	if (s_first == 1 && !strcmp(htc_get_bootmode(),"ftm")
 			&& (of_get_property(of_chosen, "is_mfg_build", NULL))) {
 		pr_info("%s: Under FTM mode, disable charger first.", __func__);
-		/* Set charger_control to DISABLE_PWRSRC */
+		
 		set_batt_psy_property(POWER_SUPPLY_PROP_CHARGING_ENABLED, 0);
 	}
 
 	s_first = 0;
 
 	if (htc_batt_info.icharger) {
-		/* dump charger status */
+		
 		htc_batt_info.icharger->dump_all();
 		htc_batt_info.vbus = htc_batt_info.icharger->get_vbus();
 	}
@@ -1951,9 +1939,8 @@ static void batt_worker(struct work_struct *work)
 		}
 	}
 
-#ifdef CONFIG_HTC_BATT_PCN0018
-	if (htc_batt_info.rep.charging_source != htc_batt_info.prev.charging_source){
-		if (htc_batt_info.rep.charging_source != POWER_SUPPLY_TYPE_USB_DCP) {
+        if (htc_batt_info.rep.charging_source != htc_batt_info.prev.charging_source){
+               if (htc_batt_info.rep.charging_source != POWER_SUPPLY_TYPE_USB_DCP) {
 			gs_cable_impedance = 0;
 			htc_batt_info.htc_extension &= ~HTC_EXT_BAD_CABLE_USED;
 			gs_R_cable_impedance = 0;
@@ -1962,12 +1949,9 @@ static void batt_worker(struct work_struct *work)
 			cancel_delayed_work_sync(&htc_batt_info.cable_impedance_work);
 		}else{
 			if (gs_measure_cable_impedance == true) {
-#ifdef CONFIG_HTC_BATT_PCN0020
 				if(g_is_pd_charger){
 					schedule_delayed_work(&htc_batt_info.cable_impedance_work, msecs_to_jiffies(4000));
-				}else
-#endif //CONFIG_HTC_BATT_PCN0020
-				{
+				}else{
 					schedule_delayed_work(&htc_batt_info.cable_impedance_work, msecs_to_jiffies(10000));
 				}
 				gs_measure_cable_impedance = false;
@@ -1978,21 +1962,22 @@ static void batt_worker(struct work_struct *work)
 		BATT_EMBEDDED("cable_impedance: %d, R_cable_impedance: %d, aicl_result: %d",
 		gs_cable_impedance, gs_R_cable_impedance, gs_aicl_result);
 	}
-#endif //CONFIG_HTC_BATT_PCN0018
 
-#ifdef CONFIG_HTC_BATT_PCN0020
 	if(g_is_pd_charger){
 		if (g_pd_current % 1000 == 0)
-			sprintf(g_chg_strbuf, "PD%dV_%dA", g_pd_voltage/1000, g_pd_current/1000);
+			sprintf(chg_strbuf, "PD%dV_%dA", g_pd_voltage/1000, g_pd_current/1000);
 		else
-			sprintf(g_chg_strbuf, "PD%dV_%d.%dA", g_pd_voltage/1000,  g_pd_current/1000, (g_pd_current % 1000)/100);
+			sprintf(chg_strbuf, "PD%dV_%d.%dA", g_pd_voltage/1000,  g_pd_current/1000, (g_pd_current % 1000)/100);
 
 		set_aicl_enable(false);
 		pmi8994_set_iusb_max(g_pd_current * 1000);
 	}
-#endif //CONFIG_HTC_BATT_PCN0020
 
-	/* FIXME: htc_extension not ready */
+#if 1
+	register_charge_level(htc_batt_info.rep.level);
+#endif
+
+	
 	BATT_EMBEDDED("ID=%d,"
 		"level=%d,"
 		"level_raw=%d,"
@@ -2009,19 +1994,12 @@ static void batt_worker(struct work_struct *work)
 		"max_iusb=%dmA,"
 		"chg_limit_reason=%d,"
 		"chg_stop_reason=%d,"
-#ifdef CONFIG_HTC_BATT_PCN0002
 		"consistent=%d,"
-#endif //CONFIG_HTC_BATT_PCN0002
 		"flag=0x%08X,"
 		"AICL=%dmA,"
 		"htc_ext=0x%02X,"
-#ifdef CONFIG_HTC_BATT_PCN0008
-		"level_accu=%d,"
-#endif //CONFIG_HTC_BATT_PCN0008
-#ifdef CONFIG_HTC_BATT_PCN0016
+#ifdef CONFIG_HTC_CHARGER
 		"htcchg=%d,"
-#endif // CONFIG_HTC_BATT_PCN0016
-#ifdef CONFIG_HTC_BATT_PCN0022
 		"usb_temp=%d,"
 		"usb_overheat=%d,"
 		"usb_overheat_stat=%d,"
