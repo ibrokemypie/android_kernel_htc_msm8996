@@ -496,11 +496,17 @@ void qpnp_kick_s2_timer(void)
 {
 	if (qpnp_get_s2_en(PON_KPDPWR_RESIN) > 0) {
 		qpnp_config_s2_enable(PON_KPDPWR_RESIN, 0);
+		/*
+		  For reliable hardware operation, the minimum time allowed between
+		  write operations is 3 sleep clock cycles.
+		  30.5us * 3 = 91.6us < 100us
+		*/
 		udelay(100);
 		qpnp_config_s2_enable(PON_KPDPWR_RESIN, 1);
 		udelay(100);
 	}
 }
+/* Note: Please don't use this funciton at IRQ handler due to it has the udelay */
 EXPORT_SYMBOL(qpnp_kick_s2_timer);
 
 #define BOOST_STATUS		0xa008
@@ -591,7 +597,7 @@ int qpnp_pon_set_s3_timer(u32 s3_debounce)
 	int rc = 0;
 	struct qpnp_pon *pon = sys_reset_dev;
 
-	
+	/* s3 debounce is SEC_ACCESS register */
 	rc = qpnp_pon_masked_write(pon, QPNP_PON_SEC_ACCESS(pon),
 			0xFF, QPNP_PON_SEC_UNLOCK);
 	if (rc) {
@@ -600,7 +606,7 @@ int qpnp_pon_set_s3_timer(u32 s3_debounce)
 		return rc;
 	}
 
-	
+	/* set PM s3 debounce time */
 	rc = qpnp_pon_masked_write(pon, QPNP_PON_S3_DBC_CTL(pon),
 			QPNP_PON_S3_DBC_DELAY_MASK, s3_debounce);
 	if (rc) {
@@ -609,10 +615,10 @@ int qpnp_pon_set_s3_timer(u32 s3_debounce)
 		return rc;
 	}
 
-	
+	/* Requires 5 sleep clock cycles of delay at least */
 	udelay(200);
 
-	
+	/* s3 debounce is SEC_ACCESS register */
 	rc = qpnp_pon_masked_write_for_pmi(pon, QPNP_PON_SEC_ACCESS(pon),
 			0xFF, QPNP_PON_SEC_UNLOCK);
 	if (rc) {
@@ -621,7 +627,7 @@ int qpnp_pon_set_s3_timer(u32 s3_debounce)
 		return rc;
 	}
 
-	
+	/* set PMI s3 debounce time */
 	rc = qpnp_pon_masked_write_for_pmi(pon, QPNP_PON_S3_DBC_CTL(pon),
 			QPNP_PON_S3_DBC_DELAY_MASK, s3_debounce);
 	if (rc) {
@@ -630,7 +636,7 @@ int qpnp_pon_set_s3_timer(u32 s3_debounce)
 		return rc;
 	}
 
-	
+	/* Requires 5 sleep clock cycles of delay at least */
 	udelay(200);
 
 	return rc;
@@ -779,12 +785,12 @@ static int qpnp_pon_reset_config(struct qpnp_pon *pon,
 	 */
 	udelay(500);
 
-	if(pon->spmi->sid == 2 && is_pmi_ES())
+	if(pon->spmi->sid == 2 && is_pmi_ES())//Change PS_HOLD hard reset and shutdown to xVdd hard reset and shutdown
 	{
 		if(type == PON_POWER_OFF_HARD_RESET)
-			type = PON_POWER_OFF_xVDD_HARD_RESET;
+			type = PON_POWER_OFF_xVDD_HARD_RESET;//Change to xVdd hard reset for PMI
 		else if(type == PON_POWER_OFF_SHUTDOWN)
-			type = PON_POWER_OFF_xVDD_SHUTDOWN;
+			type = PON_POWER_OFF_xVDD_SHUTDOWN;//Change th xVdd shutdown for PMI
 	}
 
 	rc = qpnp_pon_masked_write(pon, QPNP_PON_PS_HOLD_RST_CTL(pon),
@@ -1087,6 +1093,9 @@ qpnp_pon_input_dispatch(struct qpnp_pon *pon, u32 pon_type)
 	key_status = pon_rt_sts & pon_rt_bit;
 
 #ifdef CONFIG_QPNP_KEY_INPUT
+	/* simulate press event in case release event occured
+	 * without a press event
+	 */
 	if (!cfg->old_state && !key_status) {
 		input_report_key(pon->pon_input, cfg->key_code, 1);
 		input_sync(pon->pon_input);
@@ -1236,7 +1245,7 @@ static void bark_work_func(struct work_struct *work)
 
 	if (!(pon_rt_sts & QPNP_PON_RESIN_BARK_N_SET)) {
 #ifdef CONFIG_QPNP_KEY_INPUT
-		
+		/* report the key event and enable the bark IRQ */
 		input_report_key(pon->pon_input, cfg->key_code, 0);
 		input_sync(pon->pon_input);
 #endif
@@ -1281,11 +1290,11 @@ static irqreturn_t qpnp_resin_bark_irq(int irq, void *_pon)
 		goto err_exit;
 	}
 #ifdef CONFIG_QPNP_KEY_INPUT
-	
+	/* report the key event */
 	input_report_key(pon->pon_input, cfg->key_code, 1);
 	input_sync(pon->pon_input);
 #endif
-	
+	/* schedule work to check the bark status for key-release */
 	schedule_delayed_work(&pon->bark_work, QPNP_KEY_STATUS_DELAY);
 err_exit:
 	return IRQ_HANDLED;
@@ -1380,12 +1389,12 @@ qpnp_config_reset(struct qpnp_pon *pon, struct qpnp_pon_config *cfg)
 		return rc;
 	}
 
-	if(pon->spmi->sid == 2 && is_pmi_ES())
+	if(pon->spmi->sid == 2 && is_pmi_ES())//Change PS_HOLD hard reset and shutdown to xVdd hard reset and shutdown
 	{
 		if(cfg->s2_type == PON_POWER_OFF_HARD_RESET)
-			cfg->s2_type = PON_POWER_OFF_xVDD_HARD_RESET;
+			cfg->s2_type = PON_POWER_OFF_xVDD_HARD_RESET;//Change to xVdd hard reset for PMI
 		else if(cfg->s2_type == PON_POWER_OFF_SHUTDOWN)
-			cfg->s2_type = PON_POWER_OFF_xVDD_SHUTDOWN;
+			cfg->s2_type = PON_POWER_OFF_xVDD_SHUTDOWN;//Change th xVdd shutdown for PMI
 	}
 
 	rc = qpnp_pon_masked_write(pon, cfg->s2_cntl_addr,
@@ -1776,9 +1785,9 @@ static int qpnp_pon_config_init(struct qpnp_pon *pon)
 					"Incorrect reset type specified\n");
 				return -EINVAL;
 			}
-			
+			/* If radio flag is 0x8, let stage 2 reset type is warm reset */
 			if (get_radio_flag() & BIT(3))
-				cfg->s2_type = 1;
+				cfg->s2_type = 1;// 0x1: warm reset, 0x7: hard reset
 		}
 		/*
 		 * Get the standard-key parameters. This might not be
@@ -2037,24 +2046,24 @@ static int do_extend_s3_timer(const char *val, const struct kernel_param *kp)
 		return rc;
 	}
 
-	
+	/* do nothing, if the value is the same as the previous one */
 	if((*(bool *)kp->arg) == to_extend_s3_timer_z)
 		return 0;
 
 	if (*(bool *)kp->arg)
-		s3_debounce = ilog2(128); 
+		s3_debounce = ilog2(128); /* Set stage 3 timer as 128 sec */
 	else
-		s3_debounce = ilog2(32); 
+		s3_debounce = ilog2(32); /* Set stage 3 timer as 32 sec */
 
 
-	
+	/* Set PM/PMi S3 reset time */
 	rc = qpnp_pon_set_s3_timer(s3_debounce);
 	if (rc) {
 		pr_err("do_extend_s3_timer failed, %d\n", rc);
 		return rc;
 	}
 
-	
+	/* Update the previous state */
 	to_extend_s3_timer_z = to_extend_s3_timer;
 
 	return 0;
