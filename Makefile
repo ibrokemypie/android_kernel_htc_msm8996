@@ -354,7 +354,7 @@ $(srctree)/scripts/Kbuild.include: ;
 include $(srctree)/scripts/Kbuild.include
 
 # Set optimization flags for gcc
-FLAGS := -march=armv8-a+crypto -mtune=cortex-a57.cortex-a53 -mcpu=cortex-a57.cortex-a53+crypto -ffast-math -O3 -fgraphite -fgraphite-identity -floop-strip-mine -fmodulo-sched-allow-regmoves -ftree-loop-vectorize -ftree-slp-vectorize -fvect-cost-model -fsingle-precision-constant -fpredictive-commoning -Wno-maybe-uninitialized -Wno-misleading-indentation -Wno-array-bounds -Wno-shift-overflow
+FLAGS := -march=armv8-a+crypto -mtune=cortex-a57.cortex-a53 -mcpu=cortex-a57.cortex-a53+crypto -ffast-math -O3 -fgraphite -fgraphite-identity -floop-strip-mine -fmodulo-sched-allow-regmoves -ftree-loop-vectorize -ftree-slp-vectorize -fvect-cost-model -fsingle-precision-constant -fpredictive-commoning -Wno-maybe-uninitialized -Wno-array-bounds
 
 # Make variables (CC, etc...)
 AS		= $(CROSS_COMPILE)as
@@ -416,7 +416,7 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 		   -fno-strict-aliasing -fno-common \
 		   -Werror-implicit-function-declaration \
 		   -Wno-format-security -Wno-unused -Wno-maybe-uninitialized \
-                   -Wno-array-bounds -Wno-memset-transposed-args \
+                   -Wno-array-bounds \
                    -mcpu=cortex-a57.cortex-a53 -mtune=cortex-a57.cortex-a53 \
                    -march=armv8-a+crc \
 		   -mcpu=cortex-a57 -mtune=cortex-a57 \
@@ -427,7 +427,7 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
                    -std=gnu89
 
 # GCC 6.1 is too strict
-KBUILD_CFLAGS	+= -Wno-misleading-indentation -Wno-tautological-compare -pipe -fno-pic -O2 -march=armv8-a+crc
+KBUILD_CFLAGS	+= -pipe -fno-pic -O2 -march=armv8-a+crc
 
 # Snapdragon 820 doesn't need 835769/843419 erratum fixes
 # some toolchain enables those fixes automatically, so opt-out
